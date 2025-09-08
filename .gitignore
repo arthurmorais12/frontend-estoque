@@ -140,3 +140,4 @@ vite.config.ts.timestamp-*
 
 # E-commerce microservices (backend separado)
 ecommerce-microservices/
+senac-backend-estoque/

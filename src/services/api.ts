@@ -1,4 +1,4 @@
-const API_BASE_URL = "http://localhost:5062/api/v1";
+const API_BASE_URL = "http://localhost:5017/api/v1";
 
 export interface Product {
   id: number;
@@ -22,14 +22,40 @@ export interface UpdateProductRequest {
   stockQuantity: number;
 }
 
-// Mock user for authentication (since there's no auth backend)
+// Backend response interfaces
+export interface LoginResponse {
+  success: boolean;
+  message: string;
+  token: string;
+  expiresAt: string;
+}
+
+export interface RegisterResponse {
+  success: boolean;
+  message: string;
+  userId: number;
+}
+
 export interface User {
-  id: string;
+  id: number;
   email: string;
   name: string;
+  token: string;
 }
 
 class ApiService {
+  private getAuthHeaders(): HeadersInit {
+    const token = localStorage.getItem("token");
+    const headers: HeadersInit = {
+      "Content-Type": "application/json",
+    };
+
+    if (token) {
+      headers["Authorization"] = token;
+    }
+
+    return headers;
+  }
   async getAllProducts(): Promise<Product[]> {
     try {
       const response = await fetch(`${API_BASE_URL}/Product`);
@@ -47,9 +73,7 @@ class ApiService {
     try {
       const response = await fetch(`${API_BASE_URL}/Product`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: this.getAuthHeaders(),
         body: JSON.stringify(product),
       });
 
@@ -57,7 +81,15 @@ class ApiService {
         throw new Error("Failed to create product");
       }
 
-      return response.json();
+      // Backend retorna success/message, não o produto diretamente
+      const result = await response.json();
+      if (result.success) {
+        // Recarregar a lista de produtos para pegar o produto criado
+        // Por enquanto, retornar um produto mock
+        return { ...product, id: Date.now() } as Product;
+      }
+
+      return null;
     } catch (error) {
       console.error("Error creating product:", error);
       throw error;
@@ -69,38 +101,66 @@ class ApiService {
     product: UpdateProductRequest
   ): Promise<Product | null> {
     try {
-      const response = await fetch(`${API_BASE_URL}/Product/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/Product`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(product),
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify({ id, ...product }),
       });
 
       if (!response.ok) {
         throw new Error("Failed to update product");
       }
 
-      return response.json();
+      // Backend retorna success/message, não o produto diretamente
+      const result = await response.json();
+      if (result.success) {
+        return { id, ...product } as Product;
+      }
+
+      return null;
     } catch (error) {
       console.error("Error updating product:", error);
       throw error;
     }
   }
 
-  // Mock authentication methods
+  // Real authentication methods
   async login(email: string, password: string): Promise<User | null> {
-    // Mock authentication - in a real app, this would call an authentication API
-    if (email && password) {
-      const user = {
-        id: "1",
-        email,
-        name: email.split("@")[0],
-      };
-      localStorage.setItem("user", JSON.stringify(user));
-      return user;
+    try {
+      const response = await fetch(`${API_BASE_URL}/Auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Login failed");
+      }
+
+      const data: LoginResponse = await response.json();
+
+      if (data.success && data.token) {
+        const user: User = {
+          id: 1, // Backend não retorna ID no login, usaremos 1 por padrão
+          email,
+          name: email.split("@")[0], // Extrair nome do email por enquanto
+          token: data.token,
+        };
+
+        // Salvar usuário e token
+        localStorage.setItem("user", JSON.stringify(user));
+        localStorage.setItem("token", data.token);
+
+        return user;
+      }
+
+      return null;
+    } catch (error) {
+      console.error("Login error:", error);
+      throw error;
     }
-    return null;
   }
 
   async register(
@@ -108,17 +168,31 @@ class ApiService {
     email: string,
     password: string
   ): Promise<User | null> {
-    // Mock registration - in a real app, this would call a registration API
-    if (name && email && password) {
-      const user = {
-        id: Date.now().toString(),
-        email,
-        name,
-      };
-      localStorage.setItem("user", JSON.stringify(user));
-      return user;
+    try {
+      const response = await fetch(`${API_BASE_URL}/Auth/register`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ nome: name, email, password }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Registration failed");
+      }
+
+      const data: RegisterResponse = await response.json();
+
+      if (data.success) {
+        // Após registrar com sucesso, fazer login automaticamente
+        return await this.login(email, password);
+      }
+
+      return null;
+    } catch (error) {
+      console.error("Registration error:", error);
+      throw error;
     }
-    return null;
   }
 
   getCurrentUser(): User | null {
@@ -128,6 +202,7 @@ class ApiService {
 
   logout(): void {
     localStorage.removeItem("user");
+    localStorage.removeItem("token");
   }
 }
 
